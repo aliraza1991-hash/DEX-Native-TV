@@ -1,3 +1,4 @@
+
 package com.dex.assistant
 
 import android.app.Activity
@@ -8,20 +9,26 @@ import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import android.view.*
 import android.widget.*
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var transcript: TextView
     private lateinit var tts: TextToSpeech
+
     private val requestSpeech = 702
     private var ttsReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+
         tts = TextToSpeech(this, this)
 
         val root = LinearLayout(this).apply {
@@ -73,106 +80,194 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         })
 
         val note = TextView(this).apply {
-            text = "DEX prototype 0.1 • AI backend and remote-button bridge not connected"
+            text = "DEX prototype 0.2 • AI backend not connected"
             textSize = 12f
             setTextColor(Color.rgb(120, 145, 164))
             gravity = Gravity.CENTER
         }
         root.addView(note, LinearLayout.LayoutParams(-1, 40))
+
         setContentView(root)
         listen.requestFocus()
     }
 
     private fun startVoiceInput() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+        val intent = Intent(
+            RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+        ).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE,
+                Locale.getDefault()
+            )
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to DEX")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
+
+        status.text = "LISTENING • WAITING FOR SPEECH"
+        transcript.text = "Speak now. DEX is waiting for your command."
+
         try {
+            if (intent.resolveActivity(packageManager) == null) {
+                status.text = "VOICE SERVICE NOT FOUND"
+                transcript.text =
+                    "No compatible speech recognition service is installed or enabled."
+                return
+            }
+
             startActivityForResult(intent, requestSpeech)
         } catch (_: Exception) {
-            status.text = "VOICE INPUT UNAVAILABLE ON THIS DEVICE"
-            transcript.text = "This TV may not provide a compatible speech recognition service."
+            status.text = "COULD NOT START VOICE INPUT"
+            transcript.text =
+                "Check that a speech recognition service is installed and enabled, then try again."
         }
     }
 
-    @Deprecated("Uses the compatible Android TV speech recognition activity")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    @Deprecated("Uses the compatible Android speech recognition activity")
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?
+    ) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == requestSpeech && resultCode == RESULT_OK) {
-            val matches = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            val phrase = matches?.firstOrNull().orEmpty()
-            if (phrase.isNotBlank()) {
-                transcript.text = "You said: $phrase"
-                val response = localDemoResponse(phrase)
-                status.text = "COMMAND RECEIVED • DEMO MODE"
-                transcript.text = "$phrase\n\n$response"
-                if (ttsReady) tts.speak(response, TextToSpeech.QUEUE_FLUSH, null, "dex-response")
-            }
+
+        if (requestCode != requestSpeech) return
+
+        if (resultCode != RESULT_OK) {
+            status.text = "VOICE INPUT CANCELLED"
+            transcript.text =
+                "No command was received. Select LISTEN and try again."
+            return
+        }
+
+        val matches = data?.getStringArrayListExtra(
+            RecognizerIntent.EXTRA_RESULTS
+        )
+        val phrase = matches?.firstOrNull()?.trim().orEmpty()
+
+        if (phrase.isBlank()) {
+            status.text = "NO SPEECH DETECTED"
+            transcript.text =
+                "DEX did not receive any words. Check the microphone and try again."
+            return
+        }
+
+        val response = localDemoResponse(phrase)
+        status.text = "COMMAND RECEIVED • DEMO MODE"
+        transcript.text = "YOU SAID: $phrase\n\n$response"
+
+        if (ttsReady) {
+            tts.speak(
+                response,
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "dex-response"
+            )
         }
     }
 
     private fun localDemoResponse(input: String): String {
         val q = input.lowercase(Locale.getDefault())
+
         return when {
-            "youtube" in q -> "I heard a YouTube request. App launching is not connected in this prototype."
-            "time" in q -> "The system time is ${java.text.SimpleDateFormat("h:mm a", Locale.getDefault()).format(java.util.Date())}."
-            "hello" in q || "hi dex" in q -> "Hello. DEX is online. The AI service is not connected yet."
-            else -> "Command received. Connect the secure DEX AI backend to process this request."
+            "youtube" in q ->
+                "I heard a YouTube request. App launching is not connected yet."
+
+            "time" in q ->
+                "The system time is ${
+                    SimpleDateFormat(
+                        "h:mm a",
+                        Locale.getDefault()
+                    ).format(Date())
+                }."
+
+            "hello" in q || "hi dex" in q ->
+                "Hello. DEX is online. The AI service is not connected yet."
+
+            else ->
+                "Command received. Connect the secure DEX AI backend to process this request."
         }
     }
 
     override fun onInit(statusCode: Int) {
         ttsReady = statusCode == TextToSpeech.SUCCESS
-        if (ttsReady) tts.language = Locale.getDefault()
+
+        if (ttsReady) {
+            val result = tts.setLanguage(Locale.getDefault())
+            if (result == TextToSpeech.LANG_MISSING_DATA ||
+                result == TextToSpeech.LANG_NOT_SUPPORTED
+            ) {
+                status.text = "VOICE READY • DEFAULT TTS LANGUAGE UNAVAILABLE"
+            }
+        }
     }
 
     override fun onDestroy() {
-        if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
-        super.onDestroy()
-    }
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
-            return super.onKeyDown(keyCode, event)
+        if (::tts.isInitialized) {
+            tts.stop()
+            tts.shutdown()
         }
-        return super.onKeyDown(keyCode, event)
+        super.onDestroy()
     }
 }
 
 private class HoloOrbView(context: android.content.Context) : View(context) {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+
         val cx = width / 2f
         val cy = height / 2f
         val r = minOf(width, height) * 0.34f
+
         for (i in 7 downTo 1) {
-            p.shader = RadialGradient(cx, cy, r * i / 3f,
-                intArrayOf(Color.argb(22 * i, 25, 192, 255), Color.TRANSPARENT),
-                null, Shader.TileMode.CLAMP)
+            p.shader = RadialGradient(
+                cx, cy, r * i / 3f,
+                intArrayOf(
+                    Color.argb(22 * i, 25, 192, 255),
+                    Color.TRANSPARENT
+                ),
+                null,
+                Shader.TileMode.CLAMP
+            )
             canvas.drawCircle(cx, cy, r * i / 3f, p)
         }
+
         p.shader = null
         p.style = Paint.Style.STROKE
         p.strokeWidth = 2.2f
         p.color = Color.rgb(118, 229, 255)
         canvas.drawCircle(cx, cy, r, p)
+
         p.strokeWidth = 1f
         p.color = Color.argb(140, 85, 202, 255)
-        canvas.drawOval(cx - r * 1.28f, cy - r * .35f, cx + r * 1.28f, cy + r * .35f, p)
+        canvas.drawOval(
+            cx - r * 1.28f, cy - r * 0.35f,
+            cx + r * 1.28f, cy + r * 0.35f, p
+        )
+
         canvas.save()
         canvas.rotate(-28f, cx, cy)
-        canvas.drawOval(cx - r * 1.25f, cy - r * .48f, cx + r * 1.25f, cy + r * .48f, p)
+        canvas.drawOval(
+            cx - r * 1.25f, cy - r * 0.48f,
+            cx + r * 1.25f, cy + r * 0.48f, p
+        )
         canvas.restore()
+
         p.style = Paint.Style.FILL
         p.color = Color.rgb(207, 250, 255)
-        canvas.drawCircle(cx, cy, r * .12f, p)
+        canvas.drawCircle(cx, cy, r * 0.12f, p)
+
         p.color = Color.argb(160, 91, 223, 255)
-        canvas.drawCircle(cx, cy, r * .28f, p)
+        canvas.drawCircle(cx, cy, r * 0.28f, p)
+
         p.color = Color.rgb(4, 13, 27)
-        canvas.drawCircle(cx, cy, r * .19f, p)
+        canvas.drawCircle(cx, cy, r * 0.19f, p)
+
         p.color = Color.rgb(153, 241, 255)
         p.textAlign = Paint.Align.CENTER
         p.textSize = 14f
