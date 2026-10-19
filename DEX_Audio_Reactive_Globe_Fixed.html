@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#020207">
+<title>DEX — Audio Reactive Globe</title>
+<style>
+:root{color-scheme:dark;--ice:#9beeff;--muted:#7d91ad}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020207;color:#eaf8ff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{background:radial-gradient(ellipse at 50% 47%,#090b20 0%,#03040b 42%,#020207 75%)}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.top{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:clamp(18px,3vw,42px);z-index:2}
+.brand{font-weight:800;letter-spacing:.22em;font-size:clamp(18px,2vw,26px)}
+.sub{font-size:10px;letter-spacing:.22em;color:#7186a6;margin-top:6px}
+.status{font-size:11px;letter-spacing:.16em;color:#7b8ea8;display:flex;align-items:center;gap:9px}
+.dot{width:7px;height:7px;border-radius:50%;background:#5e6a80;box-shadow:0 0 10px #5e6a80}
+.dot.live{background:#75f4d1;box-shadow:0 0 14px #75f4d1}
+.center{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;padding:0 20px max(32px,5vh);pointer-events:none;z-index:2}
+.controls{pointer-events:auto;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center}
+h1{font-weight:500;letter-spacing:-.035em;font-size:clamp(25px,3.3vw,42px);margin:0;text-shadow:0 0 28px #8adfff22}
+.note{color:#7e91ad;font-size:clamp(12px,1.3vw,15px);margin:0;max-width:520px;line-height:1.5}
+.actions{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:5px}
+button{appearance:none;border:1px solid #31657c;background:#071725;color:#eafaff;border-radius:999px;padding:14px 22px;font-family:inherit;font-size:12px;font-weight:600;line-height:1;letter-spacing:.12em;cursor:pointer;min-height:48px;transition:transform .18s,border-color .18s,background .18s}
+button:focus-visible{outline:2px solid #a6f2ff;outline-offset:4px}
+button:hover{border-color:#a2edff;background:#0b2436}
+button:active{transform:scale(.98)}
+button.primary{background:linear-gradient(100deg,#0a3144,#14204c);border-color:#5bd9f7;box-shadow:0 0 30px #30bff41a}
+button.stop{border-color:#49354e;color:#d7c8dc}
+.meter-wrap{width:min(310px,70vw);display:flex;align-items:center;gap:10px;color:#647b9b;font-size:10px;letter-spacing:.14em}
+.meter{height:3px;flex:1;background:#132137;border-radius:9px;overflow:hidden}
+.meter span{display:block;height:100%;width:0%;background:linear-gradient(90deg,#46cfff,#b84cff,#ff3d86);box-shadow:0 0 12px #64dfff;transition:width .06s}
+.help{position:absolute;bottom:24px;left:clamp(18px,3vw,42px);font-size:10px;color:#455674;letter-spacing:.12em;z-index:2}
+.help.right{left:auto;right:clamp(18px,3vw,42px);text-align:right}
+.message{min-height:18px;color:#a5c5d8;font-size:12px;max-width:min(560px,90vw)}
+@media(max-height:650px){.center{padding-bottom:16px}.controls{gap:8px}.note{max-width:450px}.top{padding:16px 22px}button{min-height:42px;padding:11px 18px}}
+@media(prefers-reduced-motion:reduce){button{transition:none}}
+</style>
+</head>
+<body>
+<canvas id="globe" aria-label="Audio-reactive particle globe"></canvas>
+<header class="top">
+ <div><div class="brand">DEX</div><div class="sub">PERSONAL AI SYSTEM</div></div>
+ <div class="status"><span class="dot" id="dot"></span><span id="statusText">AUDIO STANDBY</span></div>
+</header>
+<main class="center">
+ <section class="controls" aria-label="Audio reactive controls">
+  <h1 id="headline">Your world, connected.</h1>
+  <p class="note" id="description">The globe responds to sound around your microphone. Start listening to bring it to life.</p>
+  <div class="actions">
+   <button class="primary" id="start">START LISTENING</button>
+   <button class="stop" id="stop" disabled>STOP</button>
+  </div>
+  <div class="meter-wrap"><span>INPUT</span><div class="meter"><span id="meterFill"></span></div><span id="level">0%</span></div>
+  <div class="message" id="message" role="status" aria-live="polite">Tap Start Listening. If this file is opened in Files preview, use an HTTPS-hosted version in Safari.</div>
+ </section>
+</main>
+<div class="help">LIVE AUDIO REACTIVE VISUAL</div>
+<div class="help right">MIC ACCESS REQUIRES CONSENT</div>
+<script>
+(()=> {
+const canvas=document.getElementById('globe'),ctx=canvas.getContext('2d',{alpha:false});
+const startBtn=document.getElementById('start'),stopBtn=document.getElementById('stop');
+const dot=document.getElementById('dot'),statusText=document.getElementById('statusText');
+const meterFill=document.getElementById('meterFill'),levelText=document.getElementById('level');
+const message=document.getElementById('message'),headline=document.getElementById('headline'),description=document.getElementById('description');
+let w=0,h=0,dpr=1,particles=[],stream=null,audioCtx=null,analyser=null,data=null,source=null,active=false;
+let volume=0,smoothed=0,rotation=0,last=0;
+const TAU=Math.PI*2;
+function resize(){
+ dpr=Math.min(window.devicePixelRatio||1,2);w=innerWidth;h=innerHeight;
+ canvas.width=Math.floor(w*dpr);canvas.height=Math.floor(h*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
+ makeParticles();
+}
+function makeParticles(){
+ particles=[];const n=Math.round(Math.min(2100,Math.max(1000,(w*h)/420)));
+ const golden=Math.PI*(3-Math.sqrt(5));
+ for(let i=0;i<n;i++){
+  const y=1-(i/(n-1))*2,rad=Math.sqrt(1-y*y),theta=golden*i;
+  particles.push({x:Math.cos(theta)*rad,y,z:Math.sin(theta)*rad,
+   phase:Math.random()*TAU,size:.45+Math.random()*1.15,seed:Math.random(),
+   band:Math.random()});
+ }
+}
+function colorFor(p,edge,glow){
+ let hue;
+ if(p.y>.45) hue=195+p.seed*65; else if(p.y>-.15) hue=250+p.seed*65; else hue=325+p.seed*55;
+ if(edge>.84 && p.y<-.15)hue=350+p.seed*18;
+ const light=Math.min(78,32+edge*32+glow*22+p.seed*10);
+ return `hsla(${hue%360},100%,${light}%,${Math.min(.98,.36+edge*.55+glow*.22)})`;
+}
+function draw(now){
+ const dt=Math.min(.04,(now-last)/1000||.016);last=now;
+ if(active&&analyser&&data){
+  analyser.getByteFrequencyData(data);
+  let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];
+  volume=Math.min(1,Math.sqrt(sum/data.length)/145);
+ }else volume*=.94;
+ smoothed+=(volume-smoothed)*(volume>smoothed?.42:.12);
+ rotation+=dt*(.12+smoothed*1.65);
+ ctx.fillStyle='#020207';ctx.fillRect(0,0,w,h);
+ const cx=w*.5,cy=h*.455;
+ const radius=Math.min(w*.315,h*.365,310);
+ const glow=smoothed;
+ const halo=ctx.createRadialGradient(cx,cy,radius*.25,cx,cy,radius*1.5);
+ halo.addColorStop(0,`rgba(32,54,145,${.08+glow*.1})`);
+ halo.addColorStop(.55,`rgba(25,28,93,${.045+glow*.05})`);
+ halo.addColorStop(1,'rgba(2,2,7,0)');
+ ctx.fillStyle=halo;ctx.fillRect(0,0,w,h);
+ const projected=[];
+ const cos=Math.cos(rotation),sin=Math.sin(rotation),tilt=.18*Math.sin(now*.00025);
+ for(const p of particles){
+  const x=p.x*cos-p.z*sin,z=p.x*sin+p.z*cos;
+  const yy=p.y*Math.cos(tilt)-z*Math.sin(tilt),zz=p.y*Math.sin(tilt)+z*Math.cos(tilt);
+  const edge=Math.sqrt(x*x+yy*yy);
+  const wave=Math.sin(Math.atan2(yy,x)*7+now*.002+p.phase);
+  const ripple=smoothed*(.025+Math.max(0,wave)*.12)*(0.4+p.seed);
+  const r=radius*(1+ripple);
+  const perspective=2.45/(2.45-zz*.45);
+  const px=cx+x*r*perspective,py=cy+yy*r*perspective;
+  const depth=(zz+1)/2;
+  const size=(p.size*(.5+depth*.8))*(1+smoothed*1.7*(.3+p.seed));
+  projected.push({p,px,py,size,depth,edge,zz});
+ }
+ projected.sort((a,b)=>a.depth-b.depth);
+ for(const q of projected){
+  const {p,px,py,size,depth,edge}=q;
+  const shimmer=.5+.5*Math.sin(now*.0018+p.phase*3);
+  const edgeGlow=Math.max(0,(edge-.66)/.34);
+  const alpha=(.17+depth*.52+shimmer*.2+smoothed*.25)*(edge>.95?1:.68);
+  ctx.fillStyle=colorFor(p,edge,smoothed);
+  ctx.globalAlpha=Math.min(.96,alpha);
+  ctx.beginPath();ctx.arc(px,py,Math.max(.35,size*(.65+edgeGlow*.55)),0,TAU);ctx.fill();
+  if(edgeGlow>.65&&(p.seed>.62||smoothed>.3)){
+   ctx.globalAlpha=Math.min(.36,edgeGlow*(.08+smoothed*.22));
+   ctx.beginPath();ctx.arc(px,py,size*2.8,0,TAU);ctx.fill();
+  }
+ }
+ ctx.globalAlpha=1;
+ // Soft, sound-driven circular pulse
+ if(smoothed>.025){
+  ctx.beginPath();ctx.arc(cx,cy,radius*(1.02+smoothed*.16),0,TAU);
+  ctx.strokeStyle=`rgba(104,177,255,${smoothed*.23})`;ctx.lineWidth=1+smoothed*2;ctx.stroke();
+ }
+ meterFill.style.width=Math.round(smoothed*100)+'%';levelText.textContent=Math.round(smoothed*100)+'%';
+ if(active){
+  statusText.textContent=smoothed>.08?'HEARING SOUND':'LISTENING';dot.classList.add('live');
+  headline.textContent=smoothed>.16?'I hear you.':'I’m listening.';
+  description.textContent=smoothed>.16?'The globe is moving with the sound around you.':'Speak, play music, or make a sound to move the globe.';
+ }
+ requestAnimationFrame(draw);
+}
+async function begin(){
+ message.textContent='Start pressed. Checking browser microphone support…';
+ if(!window.isSecureContext){
+  message.textContent='Microphone access needs a secure HTTPS website. Opening this HTML inside Files or a local file preview will not work. Host it on HTTPS, then open the web address in Safari.';
+  startBtn.disabled=false;
+  return;
+ }
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+  message.textContent='This browser does not support microphone access here. Open the app from HTTPS in a compatible browser.';
+  return;
+ }
+ startBtn.disabled=true;message.textContent='Requesting microphone permission…';
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
+  const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+  if(!AudioContextClass)throw new Error('Web Audio API is not available in this browser.');
+  audioCtx=new AudioContextClass();await audioCtx.resume();
+  analyser=audioCtx.createAnalyser();analyser.fftSize=1024;analyser.smoothingTimeConstant=.72;
+  data=new Uint8Array(analyser.frequencyBinCount);source=audioCtx.createMediaStreamSource(stream);source.connect(analyser);
+  active=true;startBtn.disabled=true;stopBtn.disabled=false;dot.classList.add('live');
+  statusText.textContent='LISTENING';message.textContent='Microphone active. Audio is analyzed locally in this browser.';
+  description.textContent='Speak or play a sound. The globe reacts in real time.';
+ }catch(err){
+  if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;active=false;startBtn.disabled=false;
+  statusText.textContent='AUDIO STANDBY';dot.classList.remove('live');
+  message.textContent=err.name==='NotAllowedError'?'Microphone permission was denied. Allow microphone access in your browser settings, then try again.':(err.message||'Could not start microphone audio.');
+ }
+}
+async function stop(){
+ active=false;volume=0;smoothed*=.25;
+ if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;
+ if(audioCtx){try{await audioCtx.close()}catch(e){}}
+ audioCtx=null;analyser=null;data=null;source=null;
+ startBtn.disabled=false;stopBtn.disabled=true;dot.classList.remove('live');statusText.textContent='AUDIO STANDBY';
+ headline.textContent='Your world, connected.';description.textContent='The globe responds to sound around your microphone. Start listening to bring it to life.';
+ message.textContent='Microphone stopped. Audio is not recorded or sent to a server by this prototype.';
+ meterFill.style.width='0%';levelText.textContent='0%';
+}
+startBtn.addEventListener('click',begin);
+startBtn.addEventListener('touchend',(event)=>{event.preventDefault();begin();},{passive:false});
+stopBtn.addEventListener('click',stop);
+stopBtn.addEventListener('touchend',(event)=>{event.preventDefault();stop();},{passive:false});
+window.addEventListener('resize',resize);document.addEventListener('visibilitychange',()=>{if(document.hidden&&active)stop()});
+resize();requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
